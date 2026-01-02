@@ -27,3 +27,6 @@ pyodbc==5.1.0
 SQLAlchemy==2.0.35
 scipy==1.14.1
 openpyxl==3.1.5
+
+# Dashboard (MVP)
+streamlit>=1.32,<2
