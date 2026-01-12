@@ -75,7 +75,7 @@ def sample_kpi_metrics() -> pd.DataFrame:
                 "Metric": "ACH Return Rate",
                 "Value": "2.4%",
                 "Alert": "Red",
-                "Link": "https://example.com/ach-returns",
+                "Link": "https://reports.speedyloan.com/single/?appid=f9a3184e-f3e8-4fab-94fa-373a0f869114&obj=36bfd39d-16a2-4b83-88a1-0a5fdb7f7f72&theme=sense&bookmark=06cc43dc-cb1b-4466-b0a3-d60246ef27cf&opt=ctxmenu,currsel",
             },
             {
                 "GroupName": "Performance",

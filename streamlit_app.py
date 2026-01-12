@@ -62,7 +62,10 @@ def _link_html(url: str) -> str:
     if not u:
         return '<span class="kpi-muted">—</span>'
     safe = _escape_html(u)
-    return f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>'
+    return (
+        f'<a href="{safe}" target="_blank" rel="noopener noreferrer" '
+        f'title="Open in a new tab">Open&nbsp;<span aria-hidden="true">↗</span></a>'
+    )
 
 
 def _sample_metrics() -> pd.DataFrame:
@@ -87,7 +90,7 @@ def _sample_metrics() -> pd.DataFrame:
             "Metric": "ACH Return Rate",
             "Value": "2.4%",
             "Alert": "Red",
-            "Link": "https://reports.speedyloan.com/single/?appid=0babed85-e3e1-4ba1-9ac6-5d8ec735585a&obj=tUevtxH&theme=sense&opt=ctxmenu,currsel&select=$::ApplicationDateYear,2025&select=$::CustType,NEW",  # null is fine; UI will show empty link
+            "Link": "https://reports.speedyloan.com/single/?appid=f9a3184e-f3e8-4fab-94fa-373a0f869114&obj=36bfd39d-16a2-4b83-88a1-0a5fdb7f7f72&theme=sense&bookmark=06cc43dc-cb1b-4466-b0a3-d60246ef27cf&opt=ctxmenu,currsel",
         },
         {
             "Group": "Performance",
