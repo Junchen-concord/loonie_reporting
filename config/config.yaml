@@ -1,0 +1,211 @@
+scheduler:
+  enabled: true
+  engine: test
+  defaults:
+    coalesce: true
+    misfire_grace_time: 300
+    jitter: 15
+    max_instances: 1
+    retry:
+      max_attempts: 3
+      backoff_seconds: 30
+      true:
+      - exception
+  day_groups:
+    weekdays:
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+    weekends:
+    - sat
+    - sun
+    allweek:
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+    - sat
+    - sun
+alerts:
+  enabled: true
+  ConversionRate:
+    enabled: true
+    thresholds:
+      mode: dynamic
+      static:
+        NEW:
+          staticLower: 10
+          staticUpper: 100
+        RTG:
+          staticLower: 65
+          staticUpper: 100
+        RTO:
+          staticLower: 10
+          staticUpper: 100
+      dynamic:
+        NEW:
+          z_score_lim: 2
+          k: 1
+          window: 30
+          percent_drop: 0.5
+          Date: '2025-11-17 00:00:00'
+          ConvRate: '0.05782312925170068'
+          rolling_mean: '0.12657273123343737'
+          rolling_std: '0.1123080162660549'
+          month_day: 11-17
+          seasonal_mean: '0.1990739234263648'
+          seasonal_std: '0.14183888084638707'
+          seasonal_zscore: '-0.9958538401585396'
+          lower_threshold: '0.014264714967382477'
+          upper_threshold: '0.23888074749949229'
+          pct_change: '-0.8265306122448979'
+          CustType: NEW
+          TimeOfSet: 14:00:18 (18/11/25)
+        RTG:
+          z_score_lim: 2
+          k: 1
+          window: 30
+          percent_drop: 0.5
+          Date: '2025-11-17 00:00:00'
+          ConvRate: '0.6379310344827587'
+          rolling_mean: '0.7518732699467194'
+          rolling_std: '0.056793745169441835'
+          month_day: 11-17
+          seasonal_mean: '0.7433815998488468'
+          seasonal_std: '0.08309806828551293'
+          seasonal_zscore: '-1.2689893705323598'
+          lower_threshold: '0.6950795247772776'
+          upper_threshold: '0.8086670151161612'
+          pct_change: '-0.22030651340996166'
+          CustType: RTG
+          TimeOfSet: 14:00:18 (18/11/25)
+        RTO:
+          z_score_lim: 2
+          k: 1
+          window: 30
+          percent_drop: 0.5
+          Date: '2025-11-17 00:00:00'
+          ConvRate: '0.1'
+          rolling_mean: '0.24329475467810027'
+          rolling_std: '0.17802835371662923'
+          month_day: 11-17
+          seasonal_mean: '0.2710526315789474'
+          seasonal_std: '0.29166611314385343'
+          seasonal_zscore: '-0.5864672784067377'
+          lower_threshold: '0.06526640096147104'
+          upper_threshold: '0.42132310839472953'
+          pct_change: inf
+          CustType: RTO
+          TimeOfSet: 14:00:18 (18/11/25)
+    channels:
+      email:
+        enabled: false
+        email_add: null
+      sms:
+        enabled: false
+        phone_nums: null
+      slack:
+        enabled: true
+        slack_ids: <@U01J4RHF4SH>, <@U01J15W6FF0>
+    schedule:
+      days:
+      - mon
+      - tue
+      - wed
+      - thu
+      - fri
+      times:
+      - 09:00
+      - '10:00'
+      - '11:00'
+      - '12:00'
+      - '13:00'
+      - '14:00'
+      - '15:00'
+      - '16:00'
+  AcceptRate:
+    enabled: true
+    thresholds:
+      mode: static
+      static:
+        lower_threshold: 1
+        upper_threshold: 5
+      dynamic:
+        z_score_lim: 2
+        k: 0.25
+        window: 30
+        percent_drop: 0.5
+        Date: '2025-11-17 00:00:00'
+        AcceRate: '0.011377479742944957'
+        rolling_mean: nan
+        rolling_std: nan
+        month_day: 11-17
+        seasonal_mean: '0.011377479742944957'
+        seasonal_std: nan
+        seasonal_zscore: nan
+        lower_threshold: nan
+        upper_threshold: nan
+        pct_change: nan
+        TimeOfSet: 14:00:40 (18/11/25)
+    channels:
+      email:
+        enabled: false
+        email_add: null
+      sms:
+        enabled: false
+        phone_nums: null
+      slack:
+        enabled: true
+        slack_ids: <@U01J4RHF4SH>, <@U01J15W6FF0>
+    schedule:
+      days:
+      - mon
+      - tue
+      - wed
+      - thu
+      - fri
+      times:
+      - 09:00
+      - '10:00'
+      - '11:00'
+      - '12:00'
+      - '13:00'
+      - '14:00'
+      - '15:00'
+      - '16:00'
+  AcceptCount:
+    enabled: true
+    thresholds:
+      mode: static
+      static:
+        lower_threshold: 10000
+      dynamic: null
+    channels:
+      email:
+        enabled: false
+        email_add: null
+      sms:
+        enabled: false
+        phone_nums: null
+      slack:
+        enabled: true
+        slack_ids: <@U01J4RHF4SH>, <@U01J15W6FF0>
+    schedule:
+      days:
+      - mon
+      - tue
+      - wed
+      - thu
+      - fri
+      times:
+      - '9:00'
+      - '10:00'
+      - '11:00'
+      - '12:00'
+      - '13:00'
+      - '14:00'
+      - '15:00'
+      - '16:00'

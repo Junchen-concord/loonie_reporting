@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ## Run the Streamlit MVP dashboard (localhost)
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run python/dashboard_kpis.py
 ```
 
 Then open the URL Streamlit prints (typically `http://localhost:8501`).
@@ -36,6 +36,8 @@ This repo is set up so the dashboard can read a **refreshed KPI feed** from:
 
 ```bash
 python -m loonie_reporting.refresh_kpis --sample
+# (CloneLending_guide-style entrypoint)
+python python/refresh_kpis.py --sample
 ```
 
 ### Refresh from SQL Server (for cron later)
@@ -44,7 +46,7 @@ python -m loonie_reporting.refresh_kpis --sample
 
 ```
 DB_SERVER=your_server
-DB_USERNAME=your_username
+DB_USERNAME=your_username   # (or DB_USER=your_username)
 DB_PASSWORD=your_password
 ODBC_DRIVER_VERSION=ODBC Driver 18 for SQL Server
 ```
@@ -55,8 +57,18 @@ ODBC_DRIVER_VERSION=ODBC Driver 18 for SQL Server
 
 ```bash
 python -m loonie_reporting.refresh_kpis
+# (CloneLending_guide-style entrypoint)
+python python/refresh_kpis.py
 ```
 
 ### Cron hook (optional)
 
 There is a cron-friendly wrapper at `scripts/refresh_kpis_cron.sh` that writes logs to `./logs/`.
+
+## CloneLending_guide-style entrypoints (optional)
+
+- Dashboard:
+
+```bash
+streamlit run python/dashboard_kpis.py
+```

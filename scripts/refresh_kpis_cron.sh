@@ -19,7 +19,7 @@ if [ -f "$REPO_ROOT/.venv/bin/activate" ]; then
 fi
 
 echo "Starting KPI refresh at $(date)" >> "$LOG_FILE"
-python -m loonie_reporting.refresh_kpis >> "$LOG_FILE" 2>&1
+python "$REPO_ROOT/python/refresh_kpis.py" >> "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then

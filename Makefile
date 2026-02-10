@@ -8,6 +8,6 @@ install:
 	pip install -r requirements.txt
 
 run-dashboard:
-	streamlit run streamlit_app.py
+	streamlit run python/dashboard_kpis.py
 
 

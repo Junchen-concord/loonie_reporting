@@ -21,4 +21,11 @@ data/**/*.xls
 data/**/*.tsv
 data/**/*.txt
 
+# Logs
+logs/
+
+# Environment files (contain secrets)
+.env
+.env.*
+
 

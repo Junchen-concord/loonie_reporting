@@ -30,3 +30,6 @@ openpyxl==3.1.5
 
 # Dashboard (MVP)
 streamlit>=1.32,<2
+
+# Config
+PyYAML>=6,<7
