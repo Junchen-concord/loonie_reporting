@@ -66,6 +66,8 @@ into #t1
 from #t
 
 
+SELECT TOP 10 *
+FROM #t1
 
 ---------------------- Summarization -----------------------------------
 SELECT 

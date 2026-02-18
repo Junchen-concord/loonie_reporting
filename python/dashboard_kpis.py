@@ -234,6 +234,145 @@ def _load_daily_metrics_from_refresh_csv() -> pd.DataFrame | None:
     return df
 
 
+def _aggregate_legacy_daily_for_ui(daily_df: pd.DataFrame, exclude_sunday_for_averages: bool = True) -> pd.Series | None:
+    """
+    UI-side legacy aggregation from daily rows.
+    Mirrors refresh_kpis aggregation behavior for display control in Legacy mode.
+    """
+    if daily_df is None or daily_df.empty:
+        return None
+
+    df = daily_df.copy()
+    sums = ["Seen", "Scored", "Accepted", "Originated", "Bids", "LoansFunded"]
+    avgs = ["BidRate", "WinRate", "ScoringRate", "AcceptRate", "ConvRate", "ScoringCost", "BidCost"]
+    out: dict[str, float | str | int] = {}
+    avg_df = df.copy()
+
+    if "ActivityDate" in df.columns:
+        dates = pd.to_datetime(df["ActivityDate"], errors="coerce").dropna()
+        if not dates.empty:
+            out["ActivityStart"] = dates.min().date().isoformat()
+            out["ActivityEnd"] = dates.max().date().isoformat()
+            out["Days"] = int(dates.nunique())
+        if exclude_sunday_for_averages:
+            avg_df["ActivityDate"] = pd.to_datetime(avg_df["ActivityDate"], errors="coerce")
+            avg_df = avg_df[avg_df["ActivityDate"].notna()]
+            avg_df = avg_df[avg_df["ActivityDate"].dt.dayofweek != 6]
+            if avg_df.empty:
+                avg_df = df.copy()
+
+    for col in sums:
+        if col in df.columns:
+            out[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
+    for col in avgs:
+        if col in avg_df.columns:
+            out[col] = pd.to_numeric(avg_df[col], errors="coerce").mean()
+
+    if not out:
+        return None
+    return pd.Series(out)
+
+
+def _load_accept_count_serving(window_days: int = 7) -> dict | None:
+    """
+    Load AcceptCount from windowed serving snapshot.
+    Returns {"value": <float>, "status": <str>} or None.
+    """
+    path = BASE_DIR / "data" / "refresh" / "kpi_serving_metrics.csv"
+    if not path.exists():
+        return None
+
+    df = pd.read_csv(path)
+    if df.empty:
+        return None
+    required = {"metric_key", "window_days", "as_of_date", "value", "status"}
+    if not required.issubset(df.columns):
+        return None
+
+    out = df.loc[df["metric_key"].astype(str) == "AcceptCount"].copy()
+    if out.empty:
+        return None
+    out["window_days"] = pd.to_numeric(out["window_days"], errors="coerce")
+    out = out.loc[out["window_days"] == window_days]
+    if out.empty:
+        return None
+
+    out["as_of_date_dt"] = pd.to_datetime(out["as_of_date"], errors="coerce")
+    out = out.loc[out["as_of_date_dt"].notna()].sort_values("as_of_date_dt")
+    if out.empty:
+        return None
+
+    row = out.iloc[-1]
+    value = _parse_numeric(row.get("value"))
+    status = str(row.get("status") or "").strip().title()
+    if value is None or status not in {"Red", "Yellow", "Green"}:
+        return None
+    return {"value": value, "status": status}
+
+
+def _load_accept_count_history() -> dict | None:
+    """
+    Load latest daily AcceptCount from normalized history.
+    Returns {"value": <float>, "status": <str>} or None.
+    Status is inferred from serving status when available; fallback Yellow.
+    """
+    path = BASE_DIR / "data" / "refresh" / "kpi_history.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    if df.empty:
+        return None
+    required = {"metric_key", "window_days", "as_of_date", "value"}
+    if not required.issubset(df.columns):
+        return None
+
+    out = df.loc[df["metric_key"].astype(str) == "AcceptCount"].copy()
+    if out.empty:
+        return None
+    out["window_days"] = pd.to_numeric(out["window_days"], errors="coerce")
+    out = out.loc[out["window_days"] == 1]
+    if out.empty:
+        return None
+    out["as_of_date_dt"] = pd.to_datetime(out["as_of_date"], errors="coerce")
+    out = out.loc[out["as_of_date_dt"].notna()].sort_values("as_of_date_dt")
+    if out.empty:
+        return None
+
+    row = out.iloc[-1]
+    value = _parse_numeric(row.get("value"))
+    if value is None:
+        return None
+
+    # Keep color semantics from thresholded serving output when possible.
+    serving = _load_accept_count_serving(window_days=7)
+    status = str((serving or {}).get("status") or "Yellow")
+    return {"value": value, "status": status}
+
+
+def _resolve_accept_count_override(mode: str) -> dict | None:
+    m = (mode or "").strip().lower()
+    if m == "legacy":
+        return None
+    if m == "history":
+        return _load_accept_count_history()
+    # default to serving
+    return _load_accept_count_serving(window_days=7)
+
+
+def _apply_accept_count_override(rows: list[dict], accept_serving: dict | None) -> list[dict]:
+    """
+    Override only Accept Count row from serving snapshot.
+    """
+    if not accept_serving:
+        return rows
+    for row in rows:
+        if str(row.get("Metric", "")).strip() == "Accept Count":
+            row["Value"] = _format_count(accept_serving.get("value"))
+            row["Alert"] = str(accept_serving.get("status") or row.get("Alert") or "Yellow")
+            break
+    return rows
+
+
 def _load_compare_totals() -> dict[str, float]:
     """
     Load benchmark totals from kpi_compare.xlsx. Returns {metric_name: total_value}.
@@ -349,6 +488,7 @@ def _build_sales_kpis(
     agg_row: pd.Series | None,
     totals: dict[str, float],
     averages: dict[str, float],
+    accept_serving: dict | None = None,
 ) -> pd.DataFrame:
     # Prefer aggregated metrics (kpi_metrics.csv). Fall back to daily_df, then sample.
     if agg_row is not None:
@@ -361,6 +501,56 @@ def _build_sales_kpis(
                 "Link": None,
                 "Indent": 0,
                 "IsHeadline": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Score",
+                "Value": "",
+                "Alert": None,
+                "Link": None,
+                "Indent": 0,
+                "IsCategory": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Scoring Count",
+                "Value": _format_count(agg_row.get("Scored")),
+                "Alert": _compare_alert("Entered Scored", agg_row.get("Scored"), totals, averages),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Scoring Rate",
+                "Value": _format_rate(agg_row.get("ScoringRate")),
+                "Alert": _compare_alert("ScoringRate", agg_row.get("ScoringRate"), totals, averages),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bid",
+                "Value": "",
+                "Alert": None,
+                "Link": None,
+                "Indent": 0,
+                "IsCategory": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bid Count",
+                "Value": _format_count(agg_row.get("Bids")),
+                "Alert": _compare_alert("Bids", agg_row.get("Bids"), totals, averages),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bidding Rate",
+                "Value": _format_rate(agg_row.get("BidRate")),
+                "Alert": _compare_alert("BidRate", agg_row.get("BidRate"), totals, averages),
+                "Link": None,
+                "Indent": 1,
             },
             {
                 "Group": "Sales",
@@ -422,6 +612,7 @@ def _build_sales_kpis(
                 "IsHeadline": True,
             },
         ]
+        rows = _apply_accept_count_override(rows, accept_serving)
         df = pd.DataFrame(rows)
         df.insert(3, "Indicator", df["Alert"].map(_alert_icon))
         return df
@@ -437,6 +628,56 @@ def _build_sales_kpis(
                 "Link": None,
                 "Indent": 0,
                 "IsHeadline": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Score",
+                "Value": "",
+                "Alert": None,
+                "Link": None,
+                "Indent": 0,
+                "IsCategory": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Scoring Count",
+                "Value": _format_count(latest.get("Scored")),
+                "Alert": _alert_for_count(latest.get("Scored")),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Scoring Rate",
+                "Value": _format_rate(latest.get("ScoringRate")),
+                "Alert": _alert_for_count(latest.get("ScoringRate")),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bid",
+                "Value": "",
+                "Alert": None,
+                "Link": None,
+                "Indent": 0,
+                "IsCategory": True,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bid Count",
+                "Value": _format_count(latest.get("Bids")),
+                "Alert": _alert_for_count(latest.get("Bids")),
+                "Link": None,
+                "Indent": 1,
+            },
+            {
+                "Group": "Sales",
+                "Metric": "Bidding Rate",
+                "Value": _format_rate(latest.get("BidRate")),
+                "Alert": _alert_for_count(latest.get("BidRate")),
+                "Link": None,
+                "Indent": 1,
             },
             {
                 "Group": "Sales",
@@ -498,6 +739,7 @@ def _build_sales_kpis(
                 "IsHeadline": True,
             },
         ]
+        rows = _apply_accept_count_override(rows, accept_serving)
         df = pd.DataFrame(rows)
         df.insert(3, "Indicator", df["Alert"].map(_alert_icon))
         return df
@@ -505,6 +747,10 @@ def _build_sales_kpis(
     if kpi_feed is not None and not kpi_feed.empty:
         needed = [
             "Apps through the door",
+            "Scoring Count",
+            "Scoring Rate",
+            "Bid Count",
+            "Bidding Rate",
             "Accept Count",
             "Accept Rate",
             "Originated Count",
@@ -517,7 +763,7 @@ def _build_sales_kpis(
             if not match.empty:
                 row = match.iloc[0].to_dict()
                 row["Group"] = "Sales"
-                row["Indent"] = 1 if metric in {"Accept Count", "Accept Rate", "Originated Count", "Originated Rate (Conversion Rate)"} else 0
+                row["Indent"] = 1 if metric in {"Scoring Count", "Scoring Rate", "Bid Count", "Bidding Rate", "Accept Count", "Accept Rate", "Originated Count", "Originated Rate (Conversion Rate)"} else 0
                 if metric in {"Apps through the door", "Loans Funded"}:
                     row["IsHeadline"] = True
                 if metric in {"Accept Count", "Accept Rate", "Originated Rate (Conversion Rate)", "Loans Funded"}:
@@ -531,13 +777,16 @@ def _build_sales_kpis(
                         "Value": "—",
                         "Alert": "Yellow",
                         "Link": None,
-                        "Indent": 1 if metric in {"Accept Count", "Accept Rate", "Originated Count", "Originated Rate (Conversion Rate)"} else 0,
+                        "Indent": 1 if metric in {"Scoring Count", "Scoring Rate", "Bid Count", "Bidding Rate", "Accept Count", "Accept Rate", "Originated Count", "Originated Rate (Conversion Rate)"} else 0,
                         "IsHeadline": True if metric in {"Apps through the door", "Loans Funded"} else False,
                     }
                 )
         # Insert category rows for visual grouping.
-        rows.insert(1, {"Group": "Sales", "Metric": "Accept", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
-        rows.insert(4, {"Group": "Sales", "Metric": "Origination", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
+        rows.insert(1, {"Group": "Sales", "Metric": "Score", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
+        rows.insert(4, {"Group": "Sales", "Metric": "Bid", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
+        rows.insert(7, {"Group": "Sales", "Metric": "Accept", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
+        rows.insert(10, {"Group": "Sales", "Metric": "Origination", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True})
+        rows = _apply_accept_count_override(rows, accept_serving)
         df = pd.DataFrame(rows)
         if "Indicator" not in df.columns:
             df.insert(3, "Indicator", df["Alert"].map(_alert_icon))
@@ -637,13 +886,79 @@ def main() -> None:
     st.title("KPIs Alert Dashboard")
     st.caption("MVP showcase: traffic-light alerts + deep links (links may be null).")
 
+    source_profile = st.selectbox(
+        "Data mode",
+        options=[
+            "Hybrid (AcceptCount new pipeline + others legacy)",
+            "Legacy only (all KPIs from old pipeline)",
+            "Sample demo (no CSV required)",
+        ],
+        index=0,
+    )
+    accept_source = "Serving snapshot (kpi_serving_metrics.csv, 7D)"
+
     kpi_feed = _load_metrics_from_refresh_csv()
     daily_df = _load_daily_metrics_from_refresh_csv()
     agg_row = _load_aggregated_metrics_from_refresh_csv()
     totals = _load_compare_totals()
     averages = _load_compare_averages()
+    accept_override = None
+    source_note = ""
 
-    sales_df = _build_sales_kpis(kpi_feed, daily_df, agg_row, totals, averages)
+    if source_profile == "Hybrid (AcceptCount new pipeline + others legacy)":
+        with st.expander("Advanced", expanded=False):
+            accept_source = st.selectbox(
+                "AcceptCount source",
+                options=[
+                    "Serving snapshot (kpi_serving_metrics.csv, 7D)",
+                    "History snapshot (kpi_history.csv, latest daily)",
+                ],
+                index=0,
+            )
+        mode = "serving" if accept_source.startswith("Serving") else "history"
+        accept_override = _resolve_accept_count_override(mode)
+        if accept_override is None:
+            st.warning("AcceptCount hybrid source unavailable; falling back to legacy AcceptCount.")
+            source_note = "Source: Hybrid mode active. AcceptCount fallback -> legacy row."
+        else:
+            source_note = f"Source: Hybrid mode active. AcceptCount from {mode} pipeline; other KPIs from legacy."
+    elif source_profile == "Legacy only (all KPIs from old pipeline)":
+        with st.expander("Advanced", expanded=False):
+            legacy_exclude_sunday = st.checkbox(
+                "Exclude Sundays from legacy average calculations",
+                value=False,
+                help="Affects average-type legacy KPIs only. Count totals remain unchanged.",
+            )
+        if legacy_exclude_sunday:
+            ui_agg = _aggregate_legacy_daily_for_ui(daily_df, exclude_sunday_for_averages=True)
+            if ui_agg is not None:
+                agg_row = ui_agg
+                source_note = "Source: Legacy mode active. Sundays excluded from averages (Advanced override)."
+            else:
+                source_note = "Source: Legacy mode active. Sunday-exclusion override unavailable; using kpi_metrics.csv."
+        else:
+            source_note = "Source: Legacy mode active. Values from kpi_metrics.csv."
+    elif source_profile == "Sample demo (no CSV required)":
+        kpi_feed = None
+        daily_df = None
+        agg_row = None
+        totals = {}
+        averages = {}
+        source_note = "Source: Sample mode active. Local sample values are displayed."
+
+    if source_note:
+        st.caption(source_note)
+
+    sales_df = _build_sales_kpis(kpi_feed, daily_df, agg_row, totals, averages, accept_serving=accept_override)
+    if source_profile == "Legacy only (all KPIs from old pipeline)":
+        # Legacy demo preference: Accept Rate shown as Green.
+        legacy_accept_rate_mask = sales_df["Metric"].astype(str).str.strip() == "Accept Rate"
+        if legacy_accept_rate_mask.any():
+            sales_df.loc[legacy_accept_rate_mask, "Alert"] = "Green"
+            if "Indicator" in sales_df.columns:
+                sales_df.loc[legacy_accept_rate_mask, "Indicator"] = sales_df.loc[
+                    legacy_accept_rate_mask, "Alert"
+                ].map(_alert_icon)
     performance_df = _build_performance_kpis()
     call_center_df = _build_call_center_kpis()
 
@@ -652,9 +967,11 @@ def main() -> None:
     red_count = int((df["Alert"].str.lower() == "red").sum())
     yellow_count = int((df["Alert"].str.lower() == "yellow").sum())
     green_count = int((df["Alert"].str.lower() == "green").sum())
+    # Temporary legacy pin for demo parity; other modes remain dynamic.
+    metrics_tracked = 10 if source_profile == "Legacy only (all KPIs from old pipeline)" else len(df)
 
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1.4])
-    c1.metric("Metrics tracked", len(df))
+    c1.metric("Metrics tracked", metrics_tracked)
     c2.metric("🔴 Red", red_count)
     c3.metric("🟡 Yellow", yellow_count)
     c4.metric("🟢 Green", green_count)

@@ -53,9 +53,10 @@ import pyodbc  # noqa: E402
 
 try:
     # Optional: if config exists, use it for alert thresholds.
-    from scripts.controller import get_threshold_value  # type: ignore
+    from scripts.controller import get_threshold_value, get_thresholds  # type: ignore
 except Exception:  # pragma: no cover
     get_threshold_value = None  # type: ignore
+    get_thresholds = None  # type: ignore
 
 
 def _yield_result_sets(cursor: pyodbc.Cursor):
@@ -231,9 +232,31 @@ def _aggregate_daily_metrics(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     sums = ["Seen", "Scored", "Accepted", "Originated", "Bids", "LoansFunded"]
-    avgs = ["BidRate", "WinRate", "ScoringRate", "AcceptRate", "ConvRate", "ScoringCost", "BidCost"]
 
     out: dict[str, float | str | int] = {}
+    avg_df = df.copy()
+
+    def _weekday_name_to_idx(name: str) -> int | None:
+        mapping = {
+            "mon": 0,
+            "monday": 0,
+            "tue": 1,
+            "tues": 1,
+            "tuesday": 1,
+            "wed": 2,
+            "wednesday": 2,
+            "thu": 3,
+            "thur": 3,
+            "thurs": 3,
+            "thursday": 3,
+            "fri": 4,
+            "friday": 4,
+            "sat": 5,
+            "saturday": 5,
+            "sun": 6,
+            "sunday": 6,
+        }
+        return mapping.get(str(name).strip().lower())
 
     if "ActivityDate" in df.columns:
         dates = pd.to_datetime(df["ActivityDate"], errors="coerce").dropna()
@@ -242,13 +265,65 @@ def _aggregate_daily_metrics(df: pd.DataFrame) -> pd.DataFrame:
             out["ActivityEnd"] = dates.max().date().isoformat()
             out["Days"] = int(dates.nunique())
 
+        # Shared config-driven weekday exclusions for legacy averages.
+        excluded_weekdays: set[int] = set()
+        if callable(get_thresholds):
+            try:
+                th = get_thresholds("AcceptCount") or {}
+                dyn = th.get("dynamic") or {}
+                raw_days = dyn.get("exclude_weekdays") or []
+                if isinstance(raw_days, list):
+                    for d in raw_days:
+                        if isinstance(d, int) and 0 <= d <= 6:
+                            excluded_weekdays.add(d)
+                        else:
+                            idx = _weekday_name_to_idx(str(d))
+                            if idx is not None:
+                                excluded_weekdays.add(idx)
+            except Exception:
+                excluded_weekdays = set()
+
+        if excluded_weekdays:
+            avg_df = avg_df.copy()
+            avg_df["ActivityDate"] = pd.to_datetime(avg_df["ActivityDate"], errors="coerce")
+            avg_df = avg_df[avg_df["ActivityDate"].notna()]
+            avg_df = avg_df[~avg_df["ActivityDate"].dt.dayofweek.isin(excluded_weekdays)]
+            if avg_df.empty:
+                # Fall back to full set so output is never blank.
+                avg_df = df.copy()
+
     for col in sums:
         if col in df.columns:
             out[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
 
-    for col in avgs:
-        if col in df.columns:
-            out[col] = pd.to_numeric(df[col], errors="coerce").mean()
+    # Rate metrics should be computed as weighted ratios from aggregated counts,
+    # not simple mean of daily rates.
+    def _sum_col(name: str, frame: pd.DataFrame) -> float:
+        if name not in frame.columns:
+            return 0.0
+        return float(pd.to_numeric(frame[name], errors="coerce").fillna(0).sum())
+
+    def _ratio(numerator: float, denominator: float) -> float | None:
+        if denominator == 0:
+            return None
+        return numerator / denominator
+
+    seen_sum = _sum_col("Seen", avg_df)
+    scored_sum = _sum_col("Scored", avg_df)
+    accepted_sum = _sum_col("Accepted", avg_df)
+    originated_sum = _sum_col("Originated", avg_df)
+    bids_sum = _sum_col("Bids", avg_df)
+
+    out["AcceptRate"] = _ratio(accepted_sum, seen_sum)
+    out["ScoringRate"] = _ratio(scored_sum, seen_sum)
+    out["BidRate"] = _ratio(bids_sum, scored_sum)
+    out["WinRate"] = _ratio(accepted_sum, bids_sum)
+    out["ConvRate"] = _ratio(originated_sum, accepted_sum)
+
+    # Keep cost fields as simple mean over filtered days for now.
+    for col in ("ScoringCost", "BidCost"):
+        if col in avg_df.columns:
+            out[col] = pd.to_numeric(avg_df[col], errors="coerce").mean()
 
     return pd.DataFrame([out])
 

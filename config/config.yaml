@@ -179,10 +179,27 @@ alerts:
   AcceptCount:
     enabled: true
     thresholds:
-      mode: static
+      mode: dynamic
       static:
         lower_threshold: 10000
-      dynamic: null
+      dynamic:
+        window: 30
+        k: 1
+        z_score_lim: 2
+        percent_drop: 0.5
+        exclude_weekdays:
+        - sun
+        direction: both
+        signals_enabled:
+        - L
+        - U
+        - Z
+        - P
+        min_history_points: 30
+        min_seasonal_points: 5
+      policy:
+        yellow_if_signal_count_gte: 1
+        red_if_signal_count_gte: 2
     channels:
       email:
         enabled: false

@@ -20,9 +20,14 @@ data/**/*.xlsx
 data/**/*.xls
 data/**/*.tsv
 data/**/*.txt
+data/archive/
+!data/archive/.gitkeep
 
 # Logs
 logs/
+
+#reporting & design files
+system_design/
 
 # Environment files (contain secrets)
 .env
