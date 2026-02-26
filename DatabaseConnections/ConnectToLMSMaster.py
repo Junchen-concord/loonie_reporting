@@ -8,6 +8,9 @@ from urllib.parse import quote_plus
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from scripts.logging_utils import setup_logger
+
+LOGGER = setup_logger(__name__, "db_connector")
 
 
 def _configure_odbc_ini_for_homebrew_macos() -> None:
@@ -57,6 +60,7 @@ class ConnectToLMSMaster:
             f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={username};PWD={password};"
             "TrustServerCertificate=yes"
         )
+        LOGGER.info("Initializing DB engine for database=%s driver=%s", database, driver)
         odbc_connect = quote_plus(conn_str)
         self.engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
 
@@ -76,11 +80,14 @@ class ConnectToLMSMaster:
         `EXEC USP_SystemAlert_AcceptCountProcedure ?, ?`
         and return all result sets.
         """
+        LOGGER.info("Executing stored procedure: %s", query)
         conn = self.engine.raw_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(query, params)
-            return list(self._yield_result_sets(cursor))
+            result_sets = list(self._yield_result_sets(cursor))
+            LOGGER.info("Stored procedure returned %d result set(s)", len(result_sets))
+            return result_sets
         finally:
             conn.close()
 
@@ -88,15 +95,19 @@ class ConnectToLMSMaster:
         """
         Execute a parameterized SQL query and return a single DataFrame.
         """
+        LOGGER.info("Executing query call (params=%d)", len(params))
         conn = self.engine.raw_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(query, params)
             if not cursor.description:
+                LOGGER.info("Query returned no tabular result.")
                 return pd.DataFrame()
             cols = [c[0] for c in cursor.description]
             rows = cursor.fetchall()
-            return pd.DataFrame.from_records(rows, columns=cols)
+            out = pd.DataFrame.from_records(rows, columns=cols)
+            LOGGER.info("Query returned %d row(s)", len(out))
+            return out
         finally:
             conn.close()
 

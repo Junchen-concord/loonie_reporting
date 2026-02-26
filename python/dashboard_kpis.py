@@ -273,9 +273,9 @@ def _aggregate_legacy_daily_for_ui(daily_df: pd.DataFrame, exclude_sunday_for_av
     return pd.Series(out)
 
 
-def _load_accept_count_serving(window_days: int = 7) -> dict | None:
+def _load_metric_serving(metric_key: str, window_days: int = 7) -> dict | None:
     """
-    Load AcceptCount from windowed serving snapshot.
+    Load one metric from windowed serving snapshot.
     Returns {"value": <float>, "status": <str>} or None.
     """
     path = BASE_DIR / "data" / "refresh" / "kpi_serving_metrics.csv"
@@ -289,7 +289,7 @@ def _load_accept_count_serving(window_days: int = 7) -> dict | None:
     if not required.issubset(df.columns):
         return None
 
-    out = df.loc[df["metric_key"].astype(str) == "AcceptCount"].copy()
+    out = df.loc[df["metric_key"].astype(str) == str(metric_key)].copy()
     if out.empty:
         return None
     out["window_days"] = pd.to_numeric(out["window_days"], errors="coerce")
@@ -308,6 +308,14 @@ def _load_accept_count_serving(window_days: int = 7) -> dict | None:
     if value is None or status not in {"Red", "Yellow", "Green"}:
         return None
     return {"value": value, "status": status}
+
+
+def _load_accept_count_serving(window_days: int = 7) -> dict | None:
+    return _load_metric_serving("AcceptCount", window_days=window_days)
+
+
+def _load_originated_count_serving(window_days: int = 7) -> dict | None:
+    return _load_metric_serving("OriginatedCount", window_days=window_days)
 
 
 def _load_accept_count_history() -> dict | None:
@@ -349,6 +357,44 @@ def _load_accept_count_history() -> dict | None:
     return {"value": value, "status": status}
 
 
+def _load_originated_count_history() -> dict | None:
+    """
+    Load latest daily OriginatedCount from normalized history.
+    Returns {"value": <float>, "status": <str>} or None.
+    Status is inferred from serving status when available; fallback Yellow.
+    """
+    path = BASE_DIR / "data" / "refresh" / "kpi_history.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    if df.empty:
+        return None
+    required = {"metric_key", "window_days", "as_of_date", "value"}
+    if not required.issubset(df.columns):
+        return None
+
+    out = df.loc[df["metric_key"].astype(str) == "OriginatedCount"].copy()
+    if out.empty:
+        return None
+    out["window_days"] = pd.to_numeric(out["window_days"], errors="coerce")
+    out = out.loc[out["window_days"] == 1]
+    if out.empty:
+        return None
+    out["as_of_date_dt"] = pd.to_datetime(out["as_of_date"], errors="coerce")
+    out = out.loc[out["as_of_date_dt"].notna()].sort_values("as_of_date_dt")
+    if out.empty:
+        return None
+
+    row = out.iloc[-1]
+    value = _parse_numeric(row.get("value"))
+    if value is None:
+        return None
+
+    serving = _load_originated_count_serving(window_days=7)
+    status = str((serving or {}).get("status") or "Yellow")
+    return {"value": value, "status": status}
+
+
 def _resolve_accept_count_override(mode: str) -> dict | None:
     m = (mode or "").strip().lower()
     if m == "legacy":
@@ -371,6 +417,64 @@ def _apply_accept_count_override(rows: list[dict], accept_serving: dict | None) 
             row["Alert"] = str(accept_serving.get("status") or row.get("Alert") or "Yellow")
             break
     return rows
+
+
+def _build_sales_window_placeholder(window_days: int) -> pd.DataFrame:
+    """
+    Showcase table for windowed Accept Count only.
+    All other Sales KPI rows remain placeholders.
+    """
+    accept = _load_accept_count_serving(window_days=window_days)
+    originated = _load_originated_count_serving(window_days=window_days)
+    accept_value = _format_count(accept.get("value")) if accept else "—"
+    accept_alert = accept.get("status") if accept else None
+    originated_value = _format_count(originated.get("value")) if originated else "—"
+    originated_alert = originated.get("status") if originated else None
+
+    rows = [
+        {"Group": "Sales", "Metric": "Apps through the door", "Value": "—", "Alert": None, "Link": None, "Indent": 0, "IsHeadline": True},
+        {"Group": "Sales", "Metric": "Score", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True},
+        {"Group": "Sales", "Metric": "Scoring Count", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Scoring Rate", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Bid", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True},
+        {"Group": "Sales", "Metric": "Bid Count", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Bidding Rate", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Accept", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True},
+        {"Group": "Sales", "Metric": "Accept Count", "Value": accept_value, "Alert": accept_alert, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Accept Rate", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Origination", "Value": "", "Alert": None, "Link": None, "Indent": 0, "IsCategory": True},
+        {"Group": "Sales", "Metric": "Originated Count", "Value": originated_value, "Alert": originated_alert, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Originated Rate (Conversion Rate)", "Value": "—", "Alert": None, "Link": None, "Indent": 1},
+        {"Group": "Sales", "Metric": "Loans Funded", "Value": "—", "Alert": None, "Link": None, "Indent": 0, "IsHeadline": True},
+    ]
+
+    df = pd.DataFrame(rows)
+    df.insert(3, "Indicator", df["Alert"].map(_alert_icon))
+    return df
+
+
+def _build_sales_with_window_overrides(base_sales_df: pd.DataFrame, window_days: int) -> pd.DataFrame:
+    """
+    Start from base Sales rows (legacy values) and override selected count KPIs
+    from serving for a specific window.
+    """
+    df = base_sales_df.copy()
+    accept = _load_accept_count_serving(window_days=window_days)
+    originated = _load_originated_count_serving(window_days=window_days)
+
+    def _apply(metric: str, payload: dict | None) -> None:
+        if not payload:
+            return
+        mask = df["Metric"].astype(str).str.strip() == metric
+        if mask.any():
+            df.loc[mask, "Value"] = _format_count(payload.get("value"))
+            df.loc[mask, "Alert"] = str(payload.get("status") or "Yellow")
+            if "Indicator" in df.columns:
+                df.loc[mask, "Indicator"] = df.loc[mask, "Alert"].map(_alert_icon)
+
+    _apply("Accept Count", accept)
+    _apply("Originated Count", originated)
+    return df
 
 
 def _load_compare_totals() -> dict[str, float]:
@@ -889,13 +993,12 @@ def main() -> None:
     source_profile = st.selectbox(
         "Data mode",
         options=[
-            "Hybrid (AcceptCount new pipeline + others legacy)",
+            "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)",
             "Legacy only (all KPIs from old pipeline)",
             "Sample demo (no CSV required)",
         ],
         index=0,
     )
-    accept_source = "Serving snapshot (kpi_serving_metrics.csv, 7D)"
 
     kpi_feed = _load_metrics_from_refresh_csv()
     daily_df = _load_daily_metrics_from_refresh_csv()
@@ -905,23 +1008,20 @@ def main() -> None:
     accept_override = None
     source_note = ""
 
-    if source_profile == "Hybrid (AcceptCount new pipeline + others legacy)":
-        with st.expander("Advanced", expanded=False):
-            accept_source = st.selectbox(
-                "AcceptCount source",
-                options=[
-                    "Serving snapshot (kpi_serving_metrics.csv, 7D)",
-                    "History snapshot (kpi_history.csv, latest daily)",
-                ],
-                index=0,
-            )
-        mode = "serving" if accept_source.startswith("Serving") else "history"
-        accept_override = _resolve_accept_count_override(mode)
-        if accept_override is None:
-            st.warning("AcceptCount hybrid source unavailable; falling back to legacy AcceptCount.")
-            source_note = "Source: Hybrid mode active. AcceptCount fallback -> legacy row."
+    if source_profile == "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)":
+        accept_override = _load_accept_count_serving(window_days=7)
+        originated_override = _load_originated_count_serving(window_days=7)
+        if accept_override is None and originated_override is None:
+            st.warning("Hybrid source unavailable for AcceptCount/OriginatedCount; falling back to legacy rows.")
+            source_note = "Source: Hybrid mode active. AcceptCount/OriginatedCount fallback -> legacy rows."
+        elif accept_override is None:
+            st.warning("Hybrid source unavailable for AcceptCount; using legacy AcceptCount row.")
+            source_note = "Source: Hybrid mode active. OriginatedCount from serving; other KPIs from legacy."
+        elif originated_override is None:
+            st.warning("Hybrid source unavailable for OriginatedCount; using legacy OriginatedCount row.")
+            source_note = "Source: Hybrid mode active. AcceptCount from serving; other KPIs from legacy."
         else:
-            source_note = f"Source: Hybrid mode active. AcceptCount from {mode} pipeline; other KPIs from legacy."
+            source_note = "Source: Hybrid mode active. AcceptCount + OriginatedCount from serving; other KPIs from legacy."
     elif source_profile == "Legacy only (all KPIs from old pipeline)":
         with st.expander("Advanced", expanded=False):
             legacy_exclude_sunday = st.checkbox(
@@ -949,7 +1049,18 @@ def main() -> None:
     if source_note:
         st.caption(source_note)
 
-    sales_df = _build_sales_kpis(kpi_feed, daily_df, agg_row, totals, averages, accept_serving=accept_override)
+    # Build base sales from selected source profile.
+    base_sales_df = _build_sales_kpis(kpi_feed, daily_df, agg_row, totals, averages, accept_serving=accept_override)
+    # In Hybrid, override AcceptCount + OriginatedCount from serving(7D).
+    if source_profile == "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)":
+        sales_7d_df = _build_sales_with_window_overrides(base_sales_df, 7)
+    else:
+        sales_7d_df = base_sales_df.copy()
+    # 1D/30D/60D tabs: placeholder model for non-AcceptCount KPIs.
+    sales_1d_df = _build_sales_window_placeholder(1)
+    sales_30d_df = _build_sales_window_placeholder(30)
+    sales_60d_df = _build_sales_window_placeholder(60)
+    sales_df = sales_7d_df.copy()
     if source_profile == "Legacy only (all KPIs from old pipeline)":
         # Legacy demo preference: Accept Rate shown as Green.
         legacy_accept_rate_mask = sales_df["Metric"].astype(str).str.strip() == "Accept Rate"
@@ -988,7 +1099,15 @@ def main() -> None:
 
     st.divider()
 
-    _render_kpi_table("Sales KPIs", sales_df)
+    sales_tabs = st.tabs(["1D", "7D", "30D", "60D"])
+    with sales_tabs[0]:
+        _render_kpi_table("Sales KPIs", sales_1d_df)
+    with sales_tabs[1]:
+        _render_kpi_table("Sales KPIs", sales_7d_df)
+    with sales_tabs[2]:
+        _render_kpi_table("Sales KPIs", sales_30d_df)
+    with sales_tabs[3]:
+        _render_kpi_table("Sales KPIs", sales_60d_df)
     st.divider()
     _render_kpi_table("SERVICING / PERFORMANCE KPIs", performance_df)
     st.divider()

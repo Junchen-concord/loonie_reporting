@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from scripts.logging_utils import setup_logger
 
-LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+LOGGER = setup_logger(__name__, "refresh_kpis")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SQL_FILE = REPO_ROOT / "sql" / "kpi_metrics.sql"

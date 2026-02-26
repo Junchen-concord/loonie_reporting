@@ -3,13 +3,14 @@ USE LMSMaster
 --Conversion Rate Alert (most updated stored procedure)
 -- =============================================
 -- Author:        Ryan Finazzo
+-- Modified by: Junchen Xiong
 -- =============================================
 SET ANSI_NULLS ON;
 GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE PROCEDURE [dbo].[USP_SystemAlert_ConversionRateProcedure]
+ALTER PROCEDURE [dbo].[USP_SystemAlert_ConversionRateProcedure]
     @startNum INT,
     @endNum   INT,
     @days     INT
@@ -29,7 +30,7 @@ BEGIN
     INNER JOIN dbo.Application AS A
         ON L.ApplicationID = A.Application_ID
         AND L.PortFolioID = A.PortFolioID
-    WHERE L.LoanStatus NOT IN ('V', 'W', 'G', 'K')
+    WHERE L.LoanStatus NOT IN ('V', 'W', 'G', 'K') AND A.DenialCode=0
         AND CONVERT(date, A.ApplicationDate)
             BETWEEN DATEADD(DAY, -@startNum, CAST(GETDATE() AS date))
                 AND DATEADD(DAY, -@endNum, CAST(GETDATE() AS date));
@@ -40,7 +41,7 @@ BEGIN
         SUM(CASE WHEN A.ApplicationSteps LIKE '%R%' THEN 1 ELSE 0 END) AS [Accepted RTG customers],
         SUM(CASE WHEN A.ApplicationSteps LIKE '%O%' AND A.ApplicationSteps NOT LIKE '%R%' THEN 1 ELSE 0 END) AS [Accepted RTO customers]
     FROM dbo.Application AS A
-    WHERE A.ApplicationStatus IN ('A', 'P')
+    WHERE A.DenialCode=0
         AND CONVERT(date, A.ApplicationDate)
             BETWEEN DATEADD(DAY, -@startNum, CAST(GETDATE() AS date))
                 AND DATEADD(DAY, -@endNum, CAST(GETDATE() AS date));
@@ -53,7 +54,7 @@ BEGIN
 
     --Dynamic Thresholds - Originated
     SELECT
-        SUM(CASE WHEN A.ApplicationSteps NOT LIKE '%R%' AND A.ApplicationSteps NOT LIKE '%O%' THEN 1 ELSE 0 END) AS [Originated Loans for NEW customers],
+        SUM(CASE WHEN A.ApplicationSteps NOT LIKE '%R%' AND A.ApplicationSteps NOT LIKE '%O%'  THEN 1 ELSE 0 END) AS [Originated Loans for NEW customers],
         SUM(CASE WHEN A.ApplicationSteps LIKE '%R%'  AND A.ApplicationSteps NOT LIKE '%O%' THEN 1 ELSE 0 END) AS [Originated Loans for RTG customers],
         SUM(CASE WHEN A.ApplicationSteps LIKE '%O%'  AND A.ApplicationSteps NOT LIKE '%R%' THEN 1 ELSE 0 END) AS [Originated Loans for RTO customers],
         CAST(A.ApplicationDate AS date) AS [ApplicationDate]
@@ -61,7 +62,7 @@ BEGIN
     INNER JOIN dbo.Application AS A
         ON L.ApplicationID = A.Application_ID
         AND L.PortFolioID = A.PortFolioID
-    WHERE L.LoanStatus NOT IN ('V', 'W', 'G', 'K')
+    WHERE L.LoanStatus NOT IN ('V', 'W', 'G', 'K') AND A.DenialCode=0
         AND A.ApplicationDate BETWEEN DATEADD(DAY, -@days, CAST(GETDATE() AS date)) AND GETDATE()
     GROUP BY CAST(A.ApplicationDate AS date)
     ORDER BY CAST(A.ApplicationDate AS date);
@@ -73,9 +74,11 @@ BEGIN
         SUM(CASE WHEN A.ApplicationSteps LIKE '%O%' AND A.ApplicationSteps NOT LIKE '%R%' THEN 1 ELSE 0 END) AS [Accepted RTO customers],
         CAST(A.ApplicationDate AS date) AS [ApplicationDate]
     FROM dbo.Application AS A
-    WHERE A.ApplicationStatus IN ('A', 'P')
+    WHERE  A.DenialCode=0
         AND A.ApplicationDate BETWEEN DATEADD(DAY, -@days, CAST(GETDATE() AS date)) AND GETDATE()
     GROUP BY CAST(A.ApplicationDate AS date)
     ORDER BY CAST(A.ApplicationDate AS date);
 END;
 GO
+
+

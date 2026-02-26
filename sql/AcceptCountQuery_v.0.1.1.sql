@@ -11,7 +11,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE PROCEDURE [dbo].[USP_SystemAlert_AcceptCountProcedure]
+ALTER PROCEDURE [dbo].[USP_SystemAlert_AcceptCountProcedure]
     @dateRange INT,
     @timeRange INT
 AS
@@ -36,7 +36,7 @@ BEGIN
     FROM dbo.Application  AS A
     INNER JOIN dbo.LeadProvider AS LP
         ON A.LeadProviderID = LP.LeadProviderID
-    WHERE A.ApplicationStatus IN ('A', 'P')
+    WHERE A.DenialCode=0
         AND A.ApplicationDate BETWEEN
             DATEADD(HOUR, -@timeRange, DATEADD(DAY, -1, CAST(GETDATE() AS datetime)))
             AND DATEADD(DAY, -1, CAST(GETDATE() AS datetime))
