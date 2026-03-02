@@ -102,7 +102,7 @@ def _build_originated_count_rows(
         LOGGER.info("Prepared %d Originated Count backfill rows from proc.", len(backfill_df))
 
     proc_summary = summarize_originated_count_from_proc(start_num=start_num, end_num=end_num, days=days)
-    proc_as_of = date.today() - timedelta(days=1)
+    proc_as_of = str(proc_summary.get("as_of_date") or (date.today() - timedelta(days=1)).isoformat())
     rows.append(
         make_kpi_row(
             as_of_date=proc_as_of,
@@ -115,7 +115,7 @@ def _build_originated_count_rows(
             source=proc_summary["source"],
         )
     )
-    LOGGER.info("Prepared current Originated Count snapshot for %s.", proc_as_of.isoformat())
+    LOGGER.info("Prepared current Originated Count snapshot for %s.", proc_as_of)
     return rows
 
 

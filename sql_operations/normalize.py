@@ -53,6 +53,12 @@ def append_history_rows(history_csv: Path, rows: Iterable[dict]) -> pd.DataFrame
     else:
         all_df = new_df
 
+    # Normalize dates to canonical YYYY-MM-DD so mixed formats
+    # (e.g., 9/26/25 vs 2025-09-26) collapse to one logical day.
+    all_df["as_of_date"] = pd.to_datetime(all_df["as_of_date"], errors="coerce").dt.date
+    all_df = all_df[all_df["as_of_date"].notna()].copy()
+    all_df["as_of_date"] = all_df["as_of_date"].astype(str)
+
     # Deduplicate by natural key, keep latest write
     key_cols = ["as_of_date", "window_days", "section", "metric_key"]
     all_df = all_df.drop_duplicates(subset=key_cols, keep="last")
@@ -150,7 +156,9 @@ def build_windowed_serving_snapshot(
     out_rows: list[dict] = []
     group_cols = ["section", "metric_key"]
     for (_, _), g in df.groupby(group_cols):
-        g = g.sort_values("as_of_date").reset_index(drop=True)
+        # Safety dedupe by parsed day inside each metric group to prevent
+        # double-counting if historical rows were ingested with mixed date formats.
+        g = g.sort_values("as_of_date").drop_duplicates(subset=["as_of_date"], keep="last").reset_index(drop=True)
         latest = g.iloc[-1]
         latest_date = latest["as_of_date"]
         value_type = str(latest.get("value_type", "count")).lower()

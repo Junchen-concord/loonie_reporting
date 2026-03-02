@@ -35,6 +35,18 @@ def _originated_cols(df: pd.DataFrame) -> list[str]:
     return cols
 
 
+def _originated_new_col(df: pd.DataFrame) -> str | None:
+    """
+    Legacy parity: prefer NEW-customer originated column.
+    Falls back to None if not found.
+    """
+    for c in df.columns:
+        name = str(c).strip().lower()
+        if "originated loans for new customers" in name:
+            return str(c)
+    return None
+
+
 def fetch_originated_count_result_sets(start_num: int = 1, end_num: int = 1, days: int = 90) -> list[pd.DataFrame]:
     dbconnector = ConnectToLMSMaster(database="LMSMaster")
     return dbconnector.callStoredProcedure(STORED_PROCEDURE, start_num, end_num, days)
@@ -71,26 +83,19 @@ def run_originated_count(start_num: int = 1, end_num: int = 1, days: int = 90) -
 
 def summarize_originated_count_from_proc(start_num: int = 1, end_num: int = 1, days: int = 90) -> dict:
     """
-    Return total Originated Count from proc output for the requested range.
-    Sums NEW/RTG/RTO originated columns from a totals result set.
+    Return latest daily Originated Count from proc output.
+    Uses the daily originated-by-custtype result set and picks latest day < today,
+    then sums NEW/RTG/RTO for that day.
     """
-    result_sets = fetch_originated_count_result_sets(start_num=start_num, end_num=end_num, days=days)
-    if not result_sets:
-        raise RuntimeError("ConversionRate procedure returned no result sets.")
-
-    for df in result_sets:
-        if df.empty:
-            continue
-        cols = _originated_cols(df)
-        date_col = _find_column(list(df.columns), ["ApplicationDate"])
-        if cols and date_col is None:
-            total = pd.Series(0.0, index=df.index)
-            for c in cols:
-                total = total + pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-            originated_count = int(float(total.sum()))
-            return {"originated_count": originated_count, "source": "originated_count_proc"}
-
-    raise RuntimeError("Could not find originated totals result set in ConversionRate procedure output.")
+    daily_df = backfill_originated_count_daily_from_proc(days=max(days, 2))
+    if daily_df.empty:
+        raise RuntimeError("Could not find daily originated result set in ConversionRate procedure output.")
+    latest = daily_df.iloc[-1]
+    return {
+        "originated_count": int(latest["OriginatedCount"]),
+        "as_of_date": str(latest["as_of_date"]),
+        "source": "originated_count_proc_daily",
+    }
 
 
 def backfill_originated_count_daily_from_proc(days: int = 90) -> pd.DataFrame:
@@ -119,8 +124,9 @@ def backfill_originated_count_daily_from_proc(days: int = 90) -> pd.DataFrame:
     if date_col is None:
         return pd.DataFrame()
 
+    new_col = _originated_new_col(daily_df)
     originated_cols = _originated_cols(daily_df)
-    if not originated_cols:
+    if new_col is None and not originated_cols:
         return pd.DataFrame()
 
     daily_df["as_of_date"] = pd.to_datetime(daily_df[date_col], errors="coerce").dt.date
@@ -128,10 +134,15 @@ def backfill_originated_count_daily_from_proc(days: int = 90) -> pd.DataFrame:
     if daily_df.empty:
         return pd.DataFrame()
 
-    total_series = pd.Series(0.0, index=daily_df.index)
-    for c in originated_cols:
-        total_series = total_series + pd.to_numeric(daily_df[c], errors="coerce").fillna(0.0)
-    daily_df["OriginatedCount"] = total_series
+    # Match legacy scope first: NEW customers only.
+    # If NEW column is unavailable, fallback to total across cust types.
+    if new_col is not None:
+        daily_df["OriginatedCount"] = pd.to_numeric(daily_df[new_col], errors="coerce").fillna(0.0)
+    else:
+        total_series = pd.Series(0.0, index=daily_df.index)
+        for c in originated_cols:
+            total_series = total_series + pd.to_numeric(daily_df[c], errors="coerce").fillna(0.0)
+        daily_df["OriginatedCount"] = total_series
 
     out = (
         daily_df.groupby("as_of_date", as_index=False)["OriginatedCount"]

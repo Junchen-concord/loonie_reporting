@@ -198,8 +198,8 @@ alerts:
         min_history_points: 30
         min_seasonal_points: 5
       policy:
-        yellow_if_signal_count_gte: 1
-        red_if_signal_count_gte: 2
+        yellow_if_signal_count_gte: 2
+        red_if_signal_count_gte: 3
     channels:
       email:
         enabled: false
@@ -248,8 +248,8 @@ alerts:
         min_history_points: 30
         min_seasonal_points: 5
       policy:
-        yellow_if_signal_count_gte: 1
-        red_if_signal_count_gte: 2
+        yellow_if_signal_count_gte: 2
+        red_if_signal_count_gte: 3
     channels:
       email:
         enabled: false

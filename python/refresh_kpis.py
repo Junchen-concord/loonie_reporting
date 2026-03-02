@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scripts.logging_utils import setup_logger
 
 LOGGER = setup_logger(__name__, "refresh_kpis")
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 SQL_FILE = REPO_ROOT / "sql" / "kpi_metrics.sql"
 OUTPUT_DIR = REPO_ROOT / "data" / "refresh"
 OUTPUT_CSV = OUTPUT_DIR / "kpi_metrics.csv"

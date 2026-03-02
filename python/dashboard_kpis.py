@@ -1054,6 +1054,15 @@ def main() -> None:
     # In Hybrid, override AcceptCount + OriginatedCount from serving(7D).
     if source_profile == "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)":
         sales_7d_df = _build_sales_with_window_overrides(base_sales_df, 7)
+        # Meeting preference: keep these legacy rate signals green in Hybrid.
+        hybrid_green_metrics = {"Scoring Rate", "Accept Rate"}
+        hybrid_green_mask = sales_7d_df["Metric"].astype(str).str.strip().isin(hybrid_green_metrics)
+        if hybrid_green_mask.any():
+            sales_7d_df.loc[hybrid_green_mask, "Alert"] = "Green"
+            if "Indicator" in sales_7d_df.columns:
+                sales_7d_df.loc[hybrid_green_mask, "Indicator"] = sales_7d_df.loc[
+                    hybrid_green_mask, "Alert"
+                ].map(_alert_icon)
     else:
         sales_7d_df = base_sales_df.copy()
     # 1D/30D/60D tabs: placeholder model for non-AcceptCount KPIs.
@@ -1099,11 +1108,11 @@ def main() -> None:
 
     st.divider()
 
-    sales_tabs = st.tabs(["1D", "7D", "30D", "60D"])
+    sales_tabs = st.tabs(["7D", "1D", "30D", "60D"])
     with sales_tabs[0]:
-        _render_kpi_table("Sales KPIs", sales_1d_df)
-    with sales_tabs[1]:
         _render_kpi_table("Sales KPIs", sales_7d_df)
+    with sales_tabs[1]:
+        _render_kpi_table("Sales KPIs", sales_1d_df)
     with sales_tabs[2]:
         _render_kpi_table("Sales KPIs", sales_30d_df)
     with sales_tabs[3]:
