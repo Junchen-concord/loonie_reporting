@@ -26,6 +26,69 @@ streamlit run python/dashboard_kpis.py
 
 Then open the URL Streamlit prints (typically `http://localhost:8501`).
 
+## Current pipeline summary
+
+```mermaid
+flowchart LR
+  subgraph legacy [Legacy_Pipeline]
+    sqlLegacy["sql/kpi_metrics.sql"] --> refreshPy["python/refresh_kpis.py"]
+    refreshPy --> dailyCsv["data/refresh/kpi_daily_metrics.csv"]
+    refreshPy --> legacyCsv["data/refresh/kpi_metrics.csv"]
+  end
+
+  subgraph orchestration [New_Orchestration_AcceptCount_OriginatedCount]
+    procAccept["USP_SystemAlert_AcceptCountProcedure + backfill query"] --> runAll["python/run_all.py"]
+    procOriginated["USP_SystemAlert_ConversionRateProcedure + proc parsing"] --> runAll
+    runAll --> rawProcCsv["data/refresh/*_count_*.csv"]
+    runAll --> historyCsv["data/refresh/kpi_history.csv"]
+    runAll --> archiveCsv["data/archive/kpi_history_YYYY_MM.csv"]
+    runAll --> servingCsv["data/refresh/kpi_serving_metrics.csv"]
+  end
+
+  subgraph ui [Streamlit_Dashboard]
+    legacyCsv --> dashboard["python/dashboard_kpis.py"]
+    dailyCsv --> dashboard
+    servingCsv --> dashboard
+    historyCsv --> dashboard
+  end
+```
+
+## Pipeline run commands
+
+Legacy refresh:
+
+```bash
+python python/refresh_kpis.py
+```
+
+New orchestration refresh with defaults:
+
+```bash
+python python/run_all.py
+```
+
+New orchestration refresh with no backfill, newest rows only:
+
+```bash
+python python/run_all.py --backfill-days 0
+```
+
+New orchestration refresh with explicit windows and retention:
+
+```bash
+python python/run_all.py --backfill-days 90 --windows 1,7,30,60 --history-retention-days 730 --history-archive-dir data/archive
+```
+
+Dashboard:
+
+```bash
+streamlit run python/dashboard_kpis.py
+```
+
+In UI:
+- pick `Dashboard view` in the sidebar
+- pick `Data mode` in the sidebar for wallboard, or top area for development
+
 ## Data refresh pattern (modeled after `jcx_lending_guide`)
 
 This repo is set up so the dashboard can read a **refreshed KPI feed** from:
