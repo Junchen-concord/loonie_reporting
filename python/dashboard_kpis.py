@@ -916,7 +916,6 @@ def _build_performance_kpis() -> pd.DataFrame:
     # Skeleton structure (placeholders only)
     rows = [
         {"Group": "Performance", "Metric": "Defaults Rate %", "Value": "—", "Alert": None, "Link": None},
-        {"Group": "Performance", "Metric": "Tracking to Plan", "Value": "—", "Alert": None, "Link": None},
         {"Group": "Performance", "Metric": "Returns vs Historical Avg", "Value": "—", "Alert": None, "Link": None},
         {"Group": "Performance", "Metric": "Payin Ratio (NEW / RETURN)", "Value": "—", "Alert": None, "Link": None},
         {"Group": "Performance", "Metric": "Collections / Resets Ratio", "Value": "—", "Alert": None, "Link": None},

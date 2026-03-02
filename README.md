@@ -6,7 +6,7 @@ Repo for data analysis used for Loonie reporting
 ### Create + activate venv
 
 ```bash
-cd /Users/starsrain/2025_concord/py_loonie_perf_reporting
+cd /Users/starsrain/2025_concord/PulseBoard
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -89,7 +89,7 @@ In UI:
 - pick `Dashboard view` in the sidebar
 - pick `Data mode` in the sidebar for wallboard, or top area for development
 
-## Data refresh pattern (modeled after `jcx_lending_guide`)
+## Data refresh pattern (modeled after `lending_guide`)
 
 This repo is set up so the dashboard can read a **refreshed KPI feed** from:
 
