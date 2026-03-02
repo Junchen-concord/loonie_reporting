@@ -1,0 +1,118 @@
+metrics:
+  - metric_key: AcceptCount
+    metric_label: Accept Count
+    domain: Sales
+    placement: hero
+    priority: 1
+    value_type: count
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: false
+
+  - metric_key: OriginatedCount
+    metric_label: Originated Count
+    domain: Sales
+    placement: hero
+    priority: 2
+    value_type: count
+    window_days_default: 7
+    cust_type_mode: new
+    drilldown_url: null
+    placeholder: false
+
+  - metric_key: AppsThroughDoor
+    metric_label: Apps through the door
+    domain: Sales
+    placement: hero
+    priority: 3
+    value_type: count
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: pending_sql
+
+  - metric_key: AcceptRate
+    metric_label: Accept Rate
+    domain: Sales
+    placement: domain
+    priority: 10
+    value_type: ratio
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: pending_sql
+
+  - metric_key: ScoringRate
+    metric_label: Scoring Rate
+    domain: Sales
+    placement: domain
+    priority: 11
+    value_type: ratio
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: pending_sql
+
+  - metric_key: ACHReturnRate
+    metric_label: ACH Return Rate
+    domain: Performance
+    placement: domain
+    priority: 20
+    value_type: ratio
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: https://reports.speedyloan.com/single/?appid=f9a3184e-f3e8-4fab-94fa-373a0f869114&obj=36bfd39d-16a2-4b83-88a1-0a5fdb7f7f72&theme=sense&bookmark=06cc43dc-cb1b-4466-b0a3-d60246ef27cf&opt=ctxmenu,currsel
+    placeholder: true
+    placeholder_reason: sample_demo_only
+
+  - metric_key: Payin
+    metric_label: Payin
+    domain: Performance
+    placement: domain
+    priority: 21
+    value_type: ratio
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: sample_demo_only
+
+  - metric_key: FPDFA
+    metric_label: FPDFA / AA%
+    domain: Performance
+    placement: domain
+    priority: 22
+    value_type: ratio
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: sample_demo_only
+
+  - metric_key: ServicingPlaceholder
+    metric_label: Servicing KPI 1
+    domain: Servicing
+    placement: domain
+    priority: 30
+    value_type: count
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: pending_sql
+
+  - metric_key: CallCenterPlaceholder
+    metric_label: Call Center KPI 1
+    domain: Call Center
+    placement: domain
+    priority: 40
+    value_type: count
+    window_days_default: 7
+    cust_type_mode: total
+    drilldown_url: null
+    placeholder: true
+    placeholder_reason: pending_sql

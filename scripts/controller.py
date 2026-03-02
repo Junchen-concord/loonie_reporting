@@ -19,6 +19,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
+KPI_REGISTRY_PATH = REPO_ROOT / "config" / "kpi_registry.yaml"
 
 
 @lru_cache(maxsize=1)
@@ -29,6 +30,25 @@ def config() -> Dict[str, Any]:
     raw = CONFIG_PATH.read_text(encoding="utf-8")
     data = yaml.safe_load(raw)
     return data or {}
+
+
+@lru_cache(maxsize=1)
+def kpi_registry() -> Dict[str, Any]:
+    """Load `config/kpi_registry.yaml` once per process."""
+    if not KPI_REGISTRY_PATH.exists():
+        return {}
+    raw = KPI_REGISTRY_PATH.read_text(encoding="utf-8")
+    data = yaml.safe_load(raw)
+    return data or {}
+
+
+def kpi_registry_metrics() -> list[dict[str, Any]]:
+    """Return normalized KPI metric metadata entries."""
+    cfg = kpi_registry()
+    rows = cfg.get("metrics", []) if isinstance(cfg, dict) else []
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
 
 
 def get_thresholds(alert_key: str) -> Dict[str, Any]:

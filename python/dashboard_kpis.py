@@ -8,9 +8,17 @@ Usage:
 """
 
 from pathlib import Path
+import sys
+from time import time
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
+from scripts.controller import kpi_registry_metrics
 
 # Streamlit requires set_page_config to be the first Streamlit call.
 # In some hot-reload paths, it may already be set; avoid crashing.
@@ -30,6 +38,8 @@ def _alert_icon(alert: str) -> str:
         return "🟡"
     if a == "red":
         return "🔴"
+    if a in {"grey", "gray"}:
+        return "⚫"
     return "⚪"
 
 
@@ -56,6 +66,9 @@ def _badge_html(alert: str) -> str:
     elif a == "green":
         cls = "badge badge-green"
         label = "Green"
+    elif a in {"grey", "gray"}:
+        cls = "badge badge-grey"
+        label = "Grey"
     else:
         cls = "badge"
         label = "Unknown"
@@ -951,7 +964,7 @@ def _render_kpi_table(title: str, df: pd.DataFrame) -> None:
         col4.markdown(f'<div class="kpi-row">{_link_html(str(row.get("Link") or ""))}</div>', unsafe_allow_html=True)
 
 
-def main() -> None:
+def render_dev_view(source_profile: str | None = None) -> None:
     st.markdown(
         """
 <style>
@@ -973,6 +986,7 @@ def main() -> None:
   .badge-red { background: rgba(255, 77, 79, 0.18); border-color: rgba(255, 77, 79, 0.35); }
   .badge-yellow { background: rgba(250, 173, 20, 0.18); border-color: rgba(250, 173, 20, 0.35); }
   .badge-green { background: rgba(82, 196, 26, 0.18); border-color: rgba(82, 196, 26, 0.35); }
+  .badge-grey { background: rgba(140, 140, 140, 0.22); border-color: rgba(200, 200, 200, 0.32); }
 
   /* table header row */
   .kpi-header { font-size: 0.85rem; font-weight: 700; opacity: 0.85; padding: 0.25rem 0; }
@@ -987,18 +1001,19 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    st.title("KPIs Alert Dashboard")
+    st.markdown("## Development (Current UI)")
     st.caption("MVP showcase: traffic-light alerts + deep links (links may be null).")
 
-    source_profile = st.selectbox(
-        "Data mode",
-        options=[
-            "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)",
-            "Legacy only (all KPIs from old pipeline)",
-            "Sample demo (no CSV required)",
-        ],
-        index=0,
-    )
+    if source_profile is None:
+        source_profile = st.selectbox(
+            "Data mode",
+            options=[
+                "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)",
+                "Legacy only (all KPIs from old pipeline)",
+                "Sample demo (no CSV required)",
+            ],
+            index=0,
+        )
 
     kpi_feed = _load_metrics_from_refresh_csv()
     daily_df = _load_daily_metrics_from_refresh_csv()
@@ -1121,6 +1136,304 @@ def main() -> None:
     _render_kpi_table("SERVICING / PERFORMANCE KPIs", performance_df)
     st.divider()
     _render_kpi_table("CALL CENTER PERFORMANCE KPIs", call_center_df)
+
+
+def _load_history_df() -> pd.DataFrame:
+    path = BASE_DIR / "data" / "refresh" / "kpi_history.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    if df.empty:
+        return df
+    if "as_of_date" in df.columns:
+        df["as_of_date_dt"] = pd.to_datetime(df["as_of_date"], errors="coerce")
+        df = df[df["as_of_date_dt"].notna()].sort_values("as_of_date_dt")
+    return df
+
+
+def _load_serving_df() -> pd.DataFrame:
+    path = BASE_DIR / "data" / "refresh" / "kpi_serving_metrics.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    if df.empty:
+        return df
+    if "as_of_date" in df.columns:
+        df["as_of_date_dt"] = pd.to_datetime(df["as_of_date"], errors="coerce")
+    if "window_days" in df.columns:
+        df["window_days"] = pd.to_numeric(df["window_days"], errors="coerce")
+    return df
+
+
+def _format_value_by_type(value: float | None, value_type: str) -> str:
+    if value is None:
+        return "—"
+    vt = str(value_type or "").strip().lower()
+    if vt in {"ratio", "rate", "percent", "percentage"}:
+        return _format_rate(value)
+    return _format_count(value)
+
+
+def _normalize_wallboard_status(raw: str | None) -> str:
+    s = str(raw or "").strip().title()
+    if s in {"Red", "Yellow", "Green"}:
+        return s
+    return "Grey"
+
+
+def _compute_delta_vs_7d(metric_key: str, value_type: str, history_df: pd.DataFrame) -> str:
+    if history_df.empty:
+        return "vs 7D: n/a"
+    required = {"metric_key", "window_days", "value", "as_of_date_dt"}
+    if not required.issubset(history_df.columns):
+        return "vs 7D: n/a"
+    m = history_df[history_df["metric_key"].astype(str) == str(metric_key)].copy()
+    if m.empty:
+        return "vs 7D: n/a"
+    m["window_days"] = pd.to_numeric(m["window_days"], errors="coerce")
+    m = m[m["window_days"] == 1].sort_values("as_of_date_dt")
+    if len(m) < 14:
+        return "vs 7D: n/a"
+    values = pd.to_numeric(m["value"], errors="coerce").dropna()
+    if len(values) < 14:
+        return "vs 7D: n/a"
+    latest_7 = float(values.iloc[-7:].sum()) if str(value_type).lower() == "count" else float(values.iloc[-7:].mean())
+    prior_7 = float(values.iloc[-14:-7].sum()) if str(value_type).lower() == "count" else float(values.iloc[-14:-7].mean())
+    if prior_7 == 0:
+        return "vs 7D: n/a"
+    pct = ((latest_7 - prior_7) / prior_7) * 100.0
+    arrow = "▲" if pct >= 0 else "▼"
+    return f"vs 7D: {arrow} {abs(pct):.1f}%"
+
+
+def _latest_serving_row(serving_df: pd.DataFrame, metric_key: str, window_days: int) -> pd.Series | None:
+    if serving_df.empty:
+        return None
+    required = {"metric_key", "window_days"}
+    if not required.issubset(serving_df.columns):
+        return None
+    m = serving_df[serving_df["metric_key"].astype(str) == str(metric_key)].copy()
+    if m.empty:
+        return None
+    m["window_days"] = pd.to_numeric(m["window_days"], errors="coerce")
+    m = m[m["window_days"] == int(window_days)]
+    if m.empty:
+        return None
+    if "as_of_date_dt" in m.columns:
+        m = m[m["as_of_date_dt"].notna()].sort_values("as_of_date_dt")
+    return m.iloc[-1] if not m.empty else None
+
+
+def _build_wallboard_kpi_rows(source_mode: str) -> list[dict]:
+    registry = sorted(kpi_registry_metrics(), key=lambda r: (int(r.get("priority", 999)), str(r.get("metric_key", ""))))
+    serving_df = _load_serving_df()
+    history_df = _load_history_df()
+    rows: list[dict] = []
+
+    for meta in registry:
+        metric_key = str(meta.get("metric_key", "")).strip()
+        if not metric_key:
+            continue
+        window_days = int(meta.get("window_days_default", 7))
+        value_type = str(meta.get("value_type", "count"))
+        row = _latest_serving_row(serving_df, metric_key, window_days)
+        value_num = _parse_numeric(row.get("value")) if row is not None else None
+        status = _normalize_wallboard_status(row.get("status") if row is not None else None)
+        updated_at = str(row.get("refreshed_at") or row.get("as_of_date") or "") if row is not None else ""
+        if bool(meta.get("placeholder", False)) and row is None:
+            status = "Grey"
+
+        rows.append(
+            {
+                "metric_key": metric_key,
+                "metric_label": str(meta.get("metric_label") or metric_key),
+                "domain": str(meta.get("domain", "Unknown")),
+                "placement": str(meta.get("placement", "domain")),
+                "priority": int(meta.get("priority", 999)),
+                "value_type": value_type,
+                "window_days": window_days,
+                "value_num": value_num,
+                "value_text": _format_value_by_type(value_num, value_type),
+                "status": status,
+                "signal_count": row.get("signal_count") if row is not None else None,
+                "signals": row.get("signals") if row is not None else "",
+                "lower_threshold": row.get("lower_threshold") if row is not None else None,
+                "upper_threshold": row.get("upper_threshold") if row is not None else None,
+                "pct_change": row.get("pct_change") if row is not None else None,
+                "seasonal_zscore": row.get("seasonal_zscore") if row is not None else None,
+                "updated_at": updated_at,
+                "source_mode": source_mode,
+                "cust_type_mode": str(meta.get("cust_type_mode", "total")).lower(),
+                "drilldown_url": meta.get("drilldown_url"),
+                "placeholder_reason": str(meta.get("placeholder_reason", "")),
+                "delta_text": _compute_delta_vs_7d(metric_key, value_type, history_df),
+            }
+        )
+    return rows
+
+
+def _render_wallboard_styles() -> None:
+    st.markdown(
+        """
+<style>
+  .block-container { padding-top: 1.1rem; padding-bottom: 1.1rem; }
+  .wb-summary-label { font-size: 0.82rem; opacity: 0.82; }
+  .wb-section-title { font-size: 1.02rem; font-weight: 700; margin: 0.1rem 0 0.35rem 0; }
+  .wb-card {
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 0.7rem 0.8rem 0.65rem 0.8rem;
+    background: rgba(255,255,255,0.015);
+    min-height: 165px;
+  }
+  .wb-card-label { font-size: 0.82rem; opacity: 0.88; }
+  .wb-card-value { font-size: 2.05rem; font-weight: 720; line-height: 1.04; margin-top: 0.25rem; }
+  .wb-card-delta { font-size: 0.84rem; opacity: 0.85; margin-top: 0.35rem; }
+  .wb-card-meta { font-size: 0.76rem; opacity: 0.78; margin-top: 0.32rem; }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _wallboard_summary_counts(rows: list[dict]) -> tuple[int, int, int, int]:
+    statuses = [str(r.get("status", "")).strip().lower() for r in rows]
+    tracked = len(rows)
+    red = sum(1 for s in statuses if s == "red")
+    yellow = sum(1 for s in statuses if s == "yellow")
+    green = sum(1 for s in statuses if s == "green")
+    return tracked, red, yellow, green
+
+
+def _render_layer_a(rows: list[dict], cust_view: str) -> None:
+    st.markdown('<div class="wb-section-title">Layer A: Executive Signal</div>', unsafe_allow_html=True)
+    allowed = {"total"} if cust_view == "ALL" else {"total", cust_view.lower()}
+    hero = [r for r in rows if r["placement"] == "hero" and r["cust_type_mode"] in allowed]
+    hero = sorted(hero, key=lambda r: (r["priority"], r["metric_label"]))[:10]
+    if not hero:
+        st.info("No hero KPIs available yet.")
+        return
+    cols = st.columns(min(4, len(hero)))
+    for idx, item in enumerate(hero):
+        with cols[idx % len(cols)]:
+            st.markdown(
+                (
+                    '<div class="wb-card">'
+                    f'<div class="wb-card-label">{_escape_html(item["metric_label"])}</div>'
+                    f'<div class="wb-card-value">{_escape_html(item["value_text"])}</div>'
+                    f'<div class="wb-card-delta">{_escape_html(item["delta_text"])}</div>'
+                    f'<div class="wb-card-meta">{_status_html(item["status"])}</div>'
+                    f'<div class="wb-card-meta">updated: {_escape_html(item["updated_at"] or "n/a")}</div>'
+                    f'<div class="wb-card-meta">source: {_escape_html(item["source_mode"])}</div>'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+
+def _render_layer_b(rows: list[dict]) -> None:
+    st.markdown('<div class="wb-section-title">Layer B: Domain Panels</div>', unsafe_allow_html=True)
+    domains = ["Sales", "Performance", "Servicing", "Call Center"]
+    for domain in domains:
+        domain_rows = [r for r in rows if str(r["domain"]).lower() == domain.lower() and r["placement"] != "hero"]
+        if not domain_rows:
+            domain_rows = [{"metric_label": f"{domain} KPI (placeholder)", "value_text": "—", "status": "Grey", "drilldown_url": None}]
+        table_df = pd.DataFrame(
+            [{"Metric": r["metric_label"], "Value": r["value_text"], "Alert": r["status"], "Link": r.get("drilldown_url")} for r in domain_rows[:6]]
+        )
+        table_df.insert(2, "Indicator", table_df["Alert"].map(_alert_icon))
+        _render_kpi_table(f"{domain} KPIs", table_df)
+
+
+def _render_layer_c(rows: list[dict]) -> None:
+    st.markdown('<div class="wb-section-title">Layer C: Explainability</div>', unsafe_allow_html=True)
+    def _fmt(value) -> str:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return "—"
+        if isinstance(value, (int, float)):
+            return f"{value:.4f}" if isinstance(value, float) else str(value)
+        text = str(value).strip()
+        return text if text else "—"
+
+    explain_df = pd.DataFrame(
+        [
+            {
+                "metric_key": r["metric_key"],
+                "metric_label": r["metric_label"],
+                "status": r["status"],
+                "signal_count": _fmt(r["signal_count"]),
+                "signals": _fmt(r["signals"]),
+                "lower_threshold": _fmt(r["lower_threshold"]),
+                "upper_threshold": _fmt(r["upper_threshold"]),
+                "pct_change": _fmt(r["pct_change"]),
+                "seasonal_zscore": _fmt(r["seasonal_zscore"]),
+                "updated_at": _fmt(r["updated_at"]),
+                "source_mode": _fmt(r["source_mode"]),
+            }
+            for r in rows
+        ]
+    )
+    if explain_df.empty:
+        st.info("Explainability data is not available yet.")
+        return
+    st.dataframe(explain_df, use_container_width=True, hide_index=True)
+
+
+def render_wallboard_view(source_profile: str) -> None:
+    _render_wallboard_styles()
+    st.markdown("## Wallboard (New UI)")
+    st.caption("Three-layer wallboard view with placeholders for KPIs pending SQL definitions.")
+    st.sidebar.markdown("### Wallboard Controls")
+    enable_rotation = st.sidebar.checkbox("Auto-rotate NEW/RETURN every 5 minutes", value=True, key="wb_auto_rotate")
+    cust_manual = st.sidebar.selectbox(
+        "Hero KPI view",
+        options=["AUTO", "NEW", "RETURN", "ALL"],
+        index=0,
+        key="wb_hero_view",
+    )
+    auto_view = "NEW" if int(time() // 300) % 2 == 0 else "RETURN"
+    cust_view = auto_view if (enable_rotation and cust_manual == "AUTO") else cust_manual
+    if cust_view == "AUTO":
+        cust_view = auto_view
+    st.caption(f"Hero view: {cust_view} | Rotation: {'ON' if enable_rotation else 'OFF'} | Mode: {source_profile}")
+    if enable_rotation:
+        components.html(
+            "<script>setTimeout(function(){ window.parent.location.reload(); }, 300000);</script>",
+            height=0,
+            width=0,
+        )
+
+    rows = _build_wallboard_kpi_rows(source_profile)
+    tracked, red_count, yellow_count, green_count = _wallboard_summary_counts(rows)
+    s1, s2, s3, s4 = st.columns([1.2, 1, 1, 1])
+    s1.metric("Metrics tracked", tracked)
+    s2.metric("🔴 Red", red_count)
+    s3.metric("🟡 Yellow", yellow_count)
+    s4.metric("🟢 Green", green_count)
+    st.markdown('<div class="wb-summary-label">Wallboard summary</div>', unsafe_allow_html=True)
+    st.divider()
+
+    _render_layer_a(rows, cust_view)
+    st.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
+    _render_layer_b(rows)
+    st.divider()
+    _render_layer_c(rows)
+
+
+def main() -> None:
+    st.title("KPIs Alert Dashboard")
+    view = st.sidebar.radio("Dashboard view", options=["Development (current)", "Wallboard (new)"])
+    modes = [
+        "Hybrid (AcceptCount + OriginatedCount from serving; others legacy)",
+        "Legacy only (all KPIs from old pipeline)",
+        "Sample demo (no CSV required)",
+    ]
+    if view == "Development (current)":
+        source_profile = st.selectbox("Data mode", options=modes, index=0, key="dev_data_mode")
+        render_dev_view(source_profile=source_profile)
+    else:
+        source_profile = st.sidebar.selectbox("Data mode", options=modes, index=0, key="wb_data_mode")
+        render_wallboard_view(source_profile=source_profile)
 
 
 if __name__ == "__main__":
