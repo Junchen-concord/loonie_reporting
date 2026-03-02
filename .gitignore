@@ -28,6 +28,7 @@ logs/
 
 #reporting & design files
 system_design/
+.cursor/**/*
 
 # Environment files (contain secrets)
 .env
